@@ -1,0 +1,153 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+local enabled = false
+local speed = 3 -- 1-10
+local hue = 0
+
+-- ========== GUI ==========
+local parent = (gethui and gethui()) or game:GetService("CoreGui")
+local okParent = pcall(function() return parent.Name end)
+if not okParent then parent = player:WaitForChild("PlayerGui") end
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "LineColorMenu"
+gui.ResetOnSpawn = false
+gui.Parent = parent
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 230, 0, 170)
+frame.Position = UDim2.new(0.5, -115, 0.5, 0)
+frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+frame.Active = true
+frame.Draggable = true
+frame.Parent = gui
+Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 10)
+
+local function mk(class, props, corner)
+    local o = Instance.new(class)
+    for k, v in pairs(props) do o[k] = v end
+    if corner then Instance.new("UICorner", o).CornerRadius = UDim.new(0, 6) end
+    o.Parent = frame
+    return o
+end
+
+mk("TextLabel", {
+    Size = UDim2.new(1, 0, 0, 26), BackgroundTransparency = 1,
+    Text = "Цвет линии", TextColor3 = Color3.new(1, 1, 1),
+    Font = Enum.Font.GothamBold, TextSize = 15,
+})
+
+local toggle = mk("TextButton", {
+    Size = UDim2.new(0.8, 0, 0, 32), Position = UDim2.new(0.1, 0, 0, 30),
+    BackgroundColor3 = Color3.fromRGB(170, 50, 50), Text = "Радуга: ВЫКЛ",
+    TextColor3 = Color3.new(1, 1, 1), Font = Enum.Font.GothamBold, TextSize = 14,
+}, true)
+
+local box = mk("TextBox", {
+    Size = UDim2.new(0.8, 0, 0, 28), Position = UDim2.new(0.1, 0, 0, 68),
+    BackgroundColor3 = Color3.fromRGB(50, 50, 50), TextColor3 = Color3.new(1, 1, 1),
+    PlaceholderText = "Скорость 1-10 (сейчас " .. speed .. ")", Text = "",
+    ClearTextOnFocus = false, Font = Enum.Font.Gotham, TextSize = 13,
+}, true)
+
+local ok = mk("TextButton", {
+    Size = UDim2.new(0.8, 0, 0, 28), Position = UDim2.new(0.1, 0, 0, 102),
+    BackgroundColor3 = Color3.fromRGB(0, 150, 80), Text = "OK",
+    TextColor3 = Color3.new(1, 1, 1), Font = Enum.Font.GothamBold, TextSize = 14,
+}, true)
+
+local info = mk("TextLabel", {
+    Size = UDim2.new(0.9, 0, 0, 30), Position = UDim2.new(0.05, 0, 0, 134),
+    BackgroundTransparency = 1, Text = "Линий найдено: 0", TextWrapped = true,
+    TextColor3 = Color3.fromRGB(200, 200, 200), Font = Enum.Font.Gotham, TextSize = 11,
+})
+
+toggle.MouseButton1Click:Connect(function()
+    enabled = not enabled
+    toggle.Text = enabled and "Радуга: ВКЛ" or "Радуга: ВЫКЛ"
+    toggle.BackgroundColor3 = enabled and Color3.fromRGB(0, 150, 80) or Color3.fromRGB(170, 50, 50)
+end)
+
+ok.MouseButton1Click:Connect(function()
+    local n = tonumber(box.Text)
+    if n then
+        speed = math.clamp(n, 1, 10)
+        box.Text = ""
+        box.PlaceholderText = "Скорость 1-10 (сейчас " .. speed .. ")"
+    else
+        box.Text = ""
+        box.PlaceholderText = "Нужно число!"
+    end
+end)
+
+-- ========== ПОИСК ЛИНИИ ==========
+local lines = {} -- [объект] = оригинальный цвет
+
+local function track(obj)
+    if lines[obj] ~= nil then return end
+    if obj:IsA("Beam") or obj:IsA("Trail") then
+        lines[obj] = obj.Color
+    elseif obj:IsA("BasePart") and not obj:IsA("Terrain") then
+        local n = string.lower(obj.Name)
+        if string.find(n, "line") or string.find(n, "beam") or string.find(n, "rope") then
+            lines[obj] = obj.Color
+        end
+    end
+end
+
+local function watch(root)
+    track(root)
+    for _, d in ipairs(root:GetDescendants()) do track(d) end
+    root.DescendantAdded:Connect(track)
+end
+
+local function isGrabFolder(o)
+    return string.find(string.lower(o.Name), "grabpart") ~= nil
+end
+
+workspace.ChildAdded:Connect(function(c)
+    if isGrabFolder(c) then watch(c) end
+end)
+for _, c in ipairs(workspace:GetChildren()) do
+    if isGrabFolder(c) then watch(c) end
+end
+
+-- ========== АНИМАЦИЯ ==========
+local POINTS = 8
+
+RunService.RenderStepped:Connect(function(dt)
+    hue = (hue + dt * speed * 0.15) % 1
+    local count = 0
+
+    for obj, original in pairs(lines) do
+        if not obj.Parent then
+            lines[obj] = nil
+        else
+            count += 1
+            if enabled then
+                if obj:IsA("Beam") or obj:IsA("Trail") then
+                    local keys = {}
+                    for i = 0, POINTS - 1 do
+                        local t = i / (POINTS - 1)
+                        keys[#keys + 1] = ColorSequenceKeypoint.new(
+                            t, Color3.fromHSV((hue + t) % 1, 1, 1)
+                        )
+                    end
+                    obj.Color = ColorSequence.new(keys)
+                else
+                    obj.Color = Color3.fromHSV(hue, 1, 1)
+                end
+            else
+                if obj:IsA("Beam") or obj:IsA("Trail") then
+                    obj.Color = original
+                else
+                    obj.Color = original
+                end
+            end
+        end
+    end
+
+    info.Text = "Линий найдено: " .. count
+end)
